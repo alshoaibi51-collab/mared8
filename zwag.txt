@@ -1,0 +1,7 @@
+islamic-matrimony-platform/
+│
+├── client/          # frontend code (React/Vue)
+├── server/          # backend code (Node.js/Express)
+├── docker/          # Docker configuration files
+├── docs/            # documentation
+└── .github/         # GitHub Actions workflows for CI/CD
