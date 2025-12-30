@@ -1,0 +1,135 @@
+# docker-compose.dev.yml
+version: '3.8'
+
+services:
+  # قاعدة البيانات PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: matrimony-postgres
+    environment:
+      POSTGRES_USER: ${DB_USER:-admin}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      POSTGRES_DB: ${DB_NAME:-matrimony}
+      PGDATA: /var/lib/postgresql/data/pgdata
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    ports:
+      - "5432:5432"
+    networks:
+      - matrimony-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U admin"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis للـ Caching والـ Sessions
+  redis:
+    image: redis:7-alpine
+    container_name: matrimony-redis
+    command: redis-server --requirepass ${REDIS_PASSWORD:-redispass}
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    networks:
+      - matrimony-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # الواجهة الخلفية (Node.js)
+  backend:
+    build:
+      context: ./server
+      dockerfile: Dockerfile.dev
+    container_name: matrimony-backend
+    volumes:
+      - ./server:/app
+      - /app/node_modules
+    environment:
+      - NODE_ENV=development
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_USER=${DB_USER:-admin}
+      - DB_PASSWORD=${DB_PASSWORD:-secret}
+      - DB_NAME=${DB_NAME:-matrimony}
+      - REDIS_HOST=redis
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-redispass}
+      - JWT_SECRET=${JWT_SECRET:-your-super-secret-jwt-key-change-this}
+      - PORT=3000
+    ports:
+      - "3000:3000"
+      - "9229:9229" # Debug port
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - matrimony-network
+    command: npm run dev
+
+  # الواجهة الأمامية (React)
+  frontend:
+    build:
+      context: ./client
+      dockerfile: Dockerfile.dev
+    container_name: matrimony-frontend
+    volumes:
+      - ./client:/app
+      - /app/node_modules
+    environment:
+      - REACT_APP_API_URL=http://localhost:3000
+      - REACT_APP_WS_URL=ws://localhost:3000
+      - NODE_ENV=development
+    ports:
+      - "3001:3000"
+    depends_on:
+      - backend
+    networks:
+      - matrimony-network
+    command: npm start
+
+  # pgAdmin لإدارة قاعدة البيانات
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: matrimony-pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@matrimony.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    networks:
+      - matrimony-network
+
+  # Redis Commander لإدارة Redis
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: matrimony-redis-commander
+    environment:
+      REDIS_HOSTS: local:redis:6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redispass}
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - matrimony-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  pgadmin_data:
+    driver: local
+
+networks:
+  matrimony-network:
+    driver: bridge
